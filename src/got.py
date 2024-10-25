@@ -1,16 +1,17 @@
 from typing import Callable, Any
-import pandas as pd
+import utils
 
 
 class Response:
-    def __init__(self, recv: float, success: bool):
+    def __init__(self, recv: int, success: bool):
+        # response receive time in ns.
         self.recv = recv
         self.success = success
 
     @staticmethod
     def parse(line: str):
         [time, info] = line.split(maxsplit=1, sep=" ")
-        time = float(time.replace("[", "").replace("]", ""))
+        time = int(time.replace("[", "").replace("]", ""))
 
         success = bool(int(info[0]))
         return Response(time, success)
@@ -22,47 +23,88 @@ class Got:
             lines = f.readlines()
         self._lines = lines
         self.responses = list(map(Response.parse, lines))
-        self.df = pd.DataFrame({"time": self.times(), "success": self.success()})
 
     def __len__(self):
         return len(self.responses)
 
-    def times(self, zeroed=True) -> list[float]:
+    def times_ns(self, zeroed=False) -> list[int]:
         times = list(map(lambda x: x.recv, self.responses))
-        if not zeroed:
-            return times
-        else:
-            min_time = min(times)
-            return list(map(lambda x: x - min_time, times))
+        if zeroed:
+            return self._zero_translation(times)
+        return times
+
+    def times_s(self, zeroed=False) -> list[float]:
+        times = utils.time_units_transform("s", self.times_ns(zeroed=False))
+        if zeroed:
+            return self._zero_translation(times)
+        return times
+
+    @staticmethod
+    def _zero_translation(values):
+        return list(map(lambda x: x - min(values), values))
 
     def rolling(
-        self, window: float, fn: Callable[[list[Response]], Any]
-    ) -> tuple[list[float], list[Any]]:
+        self,
+        window: float,
+        fn: Callable[[list[Response]], Any],
+        rate=False,
+        const_stride_secs=-1.0,
+        zeroed_times=False,
+    ) -> tuple[list[int], list[Any]]:
         """
         Evaluate the function on a rolling window.
         `window` is measured in seconds.
-        Returns a tuple, `(start_times, calc_results)`, where `start_times` is a list containing the start time of every window (seconds), and `calc_results` is a list containing the values return from `fn` for each window.
+        `rate` normalises the value returned by the function by the window length (in seconds) to create a rate with units 's^(-1)'. `False` by default.
+        `const_stride_secs` sets the window stride to a constant value (seconds), rather that evaluating a window at each data point (variable stride). `-1.0` by default, which uses variable stride.
+        `zeroed_times` subtracts `min(times)` from all times to translate the time axis to start at `0.0`. `False` by default, which allows 'syncing' data that was captured by multiple observers.
+        Returns a tuple containing 1. a list containing the end-time of every window (ns), and 2. a list containing the values return from `fn` for each window.
         """
         win_ns = window * 1_000_000_000
-        # cursors
-        s = 0
-        e = 0
-        times = self.times()
-        e_max = len(times) - 1
-        start_times = []
+        const_stride_secs_ns = int(round(const_stride_secs * 1_000_000_000))
+        # Cursor for trailing edge of the window.
+        trail = 0
+        times = self.times_ns()
+        win_leading_times = []
         calc_results = []
-        scanning = True
-        while scanning:
-            start_times.append(times[s] / 1_000_000_000)
-            while times[e] - times[s] < win_ns:
-                e += 1
-                if e == e_max:
-                    scanning = False
-                    break
-            win = self.responses[s:e]
-            calc_results.append(fn(win))
-            s += 1
-        return (start_times, calc_results)
+
+        def calc(win):
+            if rate:
+                calc_results.append(fn(win) / window)
+            else:
+                calc_results.append(fn(win))
+
+        match const_stride_secs:
+            case _ if const_stride_secs > 0.0:
+                # Cursor for the leading edge of the window, but to be excluded from the window.
+                lead_exclusive = 0
+                for t in range(
+                    times[0] + const_stride_secs_ns, times[-1], const_stride_secs_ns
+                ):
+                    win_leading_times.append(t)
+                    # seek leading cursor
+                    while times[lead_exclusive] <= t:
+                        lead_exclusive += 1
+                    # seek trailing cursor
+                    while (t - times[trail]) > win_ns:
+                        trail += 1
+                    win = self.responses[trail:lead_exclusive]
+                    calc(win)
+
+            case _ if const_stride_secs == -1.0:
+                for lead_inclusive, t in enumerate(times):
+                    # increment the trailing edge of the window while the window is too large
+                    while (t - times[trail]) > win_ns:
+                        trail += 1
+                    win = self.responses[trail : lead_inclusive + 1]
+                    calc(win)
+                win_leading_times = times
+            case _:
+                raise Exception("Invalid value for const_stride_steps")
+
+        if zeroed_times:
+            return (self._zero_translation(win_leading_times), calc_results)
+        else:
+            return (win_leading_times, calc_results)
 
     def success(self) -> list[bool]:
         return list(map(lambda x: x.success, self.responses))
