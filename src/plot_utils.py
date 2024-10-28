@@ -53,7 +53,7 @@ def rolling(
     zeroed_times=False,
     const_stride_secs=-1.0,
     times_units='s',
-    **kwargs: dict[str, Any],
+    **kwargs,
 ):
     for roller in rollers:
         times, y = got.rolling(
