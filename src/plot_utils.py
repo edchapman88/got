@@ -16,15 +16,33 @@ class Roller:
     name: str
     fn: Callable[[list[Response]], Any]
     rate: bool = False
+    kwargs: Optional[dict[str, Any]] = None
 
 
-def fig(title: str, x: str, y: str):
-    fig, ax = plt.subplots()
+@dataclass
+class Fig:
+    title: str
+    x: str
+    y: str
+
+
+def fig(figs: list[Fig], subplots: Optional[tuple[int, int]] = None):
+    if subplots is not None:
+        fig, axes = plt.subplots(*subplots)
+    else:
+        fig, ax = plt.subplots()
+        axes = [ax]
+
     fig.set_size_inches(15, 8)
-    ax.set_title(title)
-    ax.set_xlabel(x)
-    ax.set_ylabel(y)
-    return fig, ax
+
+    for f, ax in zip(figs, axes):
+        ax.set_title(f.title)
+        ax.set_xlabel(f.x)
+        ax.set_ylabel(f.y)
+    if subplots is not None:
+        return fig, axes
+    else:
+        return fig, axes[0]
 
 
 def rolling(
@@ -34,7 +52,8 @@ def rolling(
     window_secs: float,
     zeroed_times=False,
     const_stride_secs=-1.0,
-    times_units="s",
+    times_units='s',
+    **kwargs: dict[str, Any],
 ):
     for roller in rollers:
         times, y = got.rolling(
@@ -45,7 +64,11 @@ def rolling(
             const_stride_secs=const_stride_secs,
         )
         times = utils.time_units_transform(times_units, times)
-        ax.plot(times, y, label=roller.name)
+        if roller.kwargs is not None:
+            merged = {**kwargs, **roller.kwargs}
+        else:
+            merged = kwargs
+        ax.plot(times, y, label=roller.name, **merged)
 
 
 def overlay(
@@ -55,11 +78,11 @@ def overlay(
     window_secs: float,
     zeroed_times=False,
     const_stride_secs=-1.0,
-    times_units="s",
+    times_units='s',
 ):
     for id, lf in log_files.items():
         got = Got(lf.path)
-        _rollers = [replace(roller, name=f"{id}: {roller.name}") for roller in rollers]
+        _rollers = [replace(roller, name=f'{id}: {roller.name}') for roller in rollers]
         if lf.kwargs is not None:
             rolling(
                 ax,
