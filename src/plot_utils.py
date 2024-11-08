@@ -105,11 +105,10 @@ def plot_telegraf_rollers(
     for stream_id, stream in streams.items():
         # a stream_id is e.g. 'cpu', and the stream is a list of fields, e.g ['usage_system', {'usage_user': plotting_kw}]
         for field in stream:
-            if isinstance(field, str):
-                kw = {}
-            else:
-                field = field.key()
-                kw = field.value()
+            kw = {}
+            if not isinstance(field, str):
+                kw = list(field.values())[0]
+                field = list(field.keys())[0]
             # telegraf timestamps are in seconds, convert to nano-seconds as expected by `rolling`
             times = list(map(lambda x: int(1e9 * x.timestamp), eyes[stream_id]))
             values = list(map(lambda x: x[field], eyes[stream_id]))
@@ -127,10 +126,11 @@ def plot_telegraf_rollers(
                 window_end_times = utils.time_units_transform(
                     times_units, window_end_times
                 )
+                merged = kwargs
                 if roller.kwargs is not None:
-                    merged = {**kw, **roller.kwargs}
-                else:
-                    merged = kwargs
+                    merged = {**merged, **roller.kwargs}
+                if len(kw.items()) > 0:
+                    merged = {**merged, **kw}
                 ax.plot(
                     window_end_times,
                     rolling_vals,
@@ -187,3 +187,35 @@ def show_combined_legends(axes: list[Any], **kwargs):
     lines = []
     [lines.extend(ax.get_lines()) for ax in axes]
     axes[0].legend(handles=lines, **kwargs)
+
+
+def add_y_axes(parent_ax: Any, new_axes: list[tuple[str, str]]):
+    """Add one or many extra y axes to an existing matplotlib Axes object, specifying a color for the new axis. An extended wrapper for matplotlib.Axes.twinx().
+
+    Parameters
+    __________
+    parent_ax : matplotlib.Axes
+        The parent Axes, returned by a call to matplotlib.pyplot.subplots().
+    new_axes : list[tuple[str, str]]
+        Specs for one or many new y axes to be added. Each axis is specified by a tuple of the axis label and the axis color.
+
+    Returns
+    _______
+    list[matplotlib.Axes]
+        A list of the new matplotlib.Axes. Plotting onto these new axes will use the newly specificed y axes.
+
+    Example
+    _______
+    ax_vel,ax_dist = add_y_axes(original_ax, [('velocity','r'),('distance','purple')]
+    """
+
+    axes = []
+    for i, (label, color) in enumerate(new_axes):
+        ax = parent_ax.twinx()
+        ax.set_ylabel(label)
+        ax.spines['right'].set_edgecolor(color)
+        ax.tick_params(axis='y', colors=color)
+        if i > 0:
+            ax.spines['right'].set_position(('axes', 1 + i * 0.08))
+        axes.append(ax)
+    return axes
