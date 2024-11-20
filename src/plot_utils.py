@@ -111,6 +111,11 @@ def plot_telegraf_rollers(
                 field = list(field.keys())[0]
             # telegraf timestamps are in seconds, convert to nano-seconds as expected by `rolling`
             times = list(map(lambda x: int(1e9 * x.timestamp), eyes[stream_id]))
+            # for netflow data, use the `flow_start_ms` field instead of the logging timestamp
+            if stream_id == 'netflow':
+                # expect a 'use_time' specifier
+                timing_key = kw.pop('use_time')
+                times = list(map(lambda x: int(1e6 * x[timing_key]), eyes[stream_id]))
             values = list(map(lambda x: x[field], eyes[stream_id]))
             # apply rolling window
             for roller in rollers:

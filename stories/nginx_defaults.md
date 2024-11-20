@@ -1,4 +1,4 @@
-### What's the highest request rate the server can handle?
+## What's the highest request rate the server can handle?
 In the absence of any denial of service attacks, under _normal operation_ and for a range of client request loads, it appears there is a **maximum instantaneous response rate** imposed by the server.
 ![image](../experiments/241028_normal_operation/plots/range_of_request_loads.png)
 
@@ -8,7 +8,7 @@ However, the responses do not stop indefinitely. After a delay a flurry of OK an
 
 A tentative (but I think incorrect) conclusion from this is that the server can handle loads up to 27 RPS without forming queues and causing transient effects. But the log files on the client device only tell part of the story.
 
-### Are the RPS limitations imposed by Nginx?
+## Are the RPS limitations imposed by Nginx?
 There are some useful metrics readily available from Nginx servers: the current number of `active`, `reading`, `writing` and `waiting` requests; and the total number of `requests`, `accepts` and `handled` requests.
 
 For a low request load of 5 RPS, `active` and `waiting` requests behave pretty much as expected. Either 0 or 1 requests are waiting at any one time during the application of the request load, 0 requests waiting before and after the request load is applied. There is always 1 `active` connection, even in the absence of a request load - this is the connection to the proxied Node application.
@@ -34,6 +34,39 @@ The same experiment was run with a much higher request load of 40 RPS. What do t
 
 ![image](../experiments/241108_diagnose_nginx/plots/40RPS.png)
 
+The big step change in `waiting` requests coincides with the responses dropping to 0 as observed by the client.
+
+## Setting `Connection: close` HTTP header and re-running 20 RPS normal operation
+Two re-runs (one short, one longer than before) fail to reproduce the big step change in `waiting` requests:
+
+![image](../experiments/241113_20RPS/plots/connection:close_short.png)
+![image](../experiments/241113_20RPS/plots/connection:close_long.png)
+
+It's not clear whether the HTTP header has resolved the issue, or whether the issue is intermittent.
+
+## Setting `keepalive` connections between the Nginx proxy and the Node upstream server
 
 
+# Troubleshooting
+## 1. Upstream server bottleneck
+- Is this imposing the 27 RPS max response rate?
+- How does nginx handle a slow upstream (e.g. when there is no rate limiting configured)
+- Test this by slowing down the server (sleep in the request handler), or running multiple upstream servers with load balancing.
 
+## 2. How many workers, how many `worker_connections`, how many file descriptors?
+- "_By default, Nginx spawns a worker process for each CPU core available on the system._". Set manually with `worker_processes`.
+- `worker_connections` is 512 by default, fd limit should be double (probably 1024 by default).
+
+## 3. KeepAlive connections to upstream
+
+## 4. Explicitly configure rate limiting
+- Configuration guide [here](https://blog.nginx.org/blog/rate-limiting-nginx).
+- `limit_req_zone` and `limit_req`.
+- `burst`
+- `delay` / `nodelay`
+
+## 5. Are the client connections '_keepalive_'?
+- Set the `Connection` header to `close`.
+
+## 6. Reset Nginx between experiments to reset cumulative stats?
+`systemctl restart nginx.service` resets the cumulative nginx stats (`requests`, `active`, `handled`). Rebooting the system also restart the service.
