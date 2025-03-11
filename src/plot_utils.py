@@ -1,6 +1,7 @@
 from typing import Callable, Any, Optional
 import matplotlib.pyplot as plt
 from got import Got, Response
+from blue import Blue
 from eyes import Eyes, Cpu, Mem, Disk, Nginx, Netflow
 from dataclasses import dataclass, replace
 import utils
@@ -8,10 +9,11 @@ from enum import Enum, auto
 
 
 class LogFileType(Enum):
-    """Either a 'got' log file created by the 'getting' HTTP load generator, or a 'telegraf' log file created by the telegraf system metrics pipeline."""
+    """Either a 'got' log file created by the 'getting' HTTP load generator, a 'telegraf' log file created by the telegraf system metrics pipeline, or a 'blue' log file created by the 'blue' cyber defence program."""
 
     GOT = auto()
     TELEGRAF = auto()
+    BLUE = auto()
 
 
 @dataclass
@@ -144,6 +146,53 @@ def plot_telegraf_rollers(
                 )
 
 
+def plot_blue_rollers(
+    ax,
+    path: str,
+    rollers: list[Roller],
+    window_secs: float,
+    zeroed_times=False,
+    const_stride_secs=-1.0,
+    times_units='s',
+    **kwargs,
+):
+    blue = Blue(path)
+    if 'states' in kwargs:
+        times, states = tuple(map(list, zip(*blue.states)))
+        for feature in kwargs.pop('states'):
+            kw = {}
+            if not isinstance(feature, str):
+                kw = list(feature.values())[0]
+                feature = list(feature.keys())[0]
+            values = list(map(lambda x: x[feature], states))
+            for roller in rollers:
+                window_end_times, rolling_vals = utils.rolling(
+                    times,
+                    values,
+                    window=window_secs,
+                    fn=roller.fn,
+                    rate=roller.rate,
+                    const_stride_secs=const_stride_secs,
+                    zeroed_times=zeroed_times,
+                )
+                window_end_times = utils.time_units_transform(
+                    times_units, window_end_times
+                )
+                merged = kwargs
+                if roller.kwargs is not None:
+                    merged = {**merged, **roller.kwargs}
+                if len(kw.items()) > 0:
+                    merged = {**merged, **kw}
+                ax.plot(
+                    window_end_times,
+                    rolling_vals,
+                    label=f'{roller.name} {feature}',
+                    **merged,
+                )
+    else:
+        raise Exception('todo: support plotting actions')
+
+
 def overlay_rolling(
     ax,
     log_files: dict,
@@ -175,6 +224,17 @@ def overlay_rolling(
                 )
             case LogFileType.TELEGRAF:
                 plot_telegraf_rollers(
+                    ax,
+                    lf.path,
+                    _rollers,
+                    window_secs,
+                    zeroed_times,
+                    const_stride_secs,
+                    times_units,
+                    **kwargs,
+                )
+            case LogFileType.BLUE:
+                plot_blue_rollers(
                     ax,
                     lf.path,
                     _rollers,
