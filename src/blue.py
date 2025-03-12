@@ -47,3 +47,41 @@ class Blue:
                 else:
                     actions.append((time, Action.parse(info.strip('\n'))))
         self.actions, self.states = actions, states
+
+    def stats(self, sorted=False):
+        half = round((self.states[-1][0] - self.states[0][0]) / 2) + self.states[0][0]
+        exploration = [state for (time, state) in self.states if time < half]
+        cumulative_reward = {
+            'none_blocked': 0,
+            'both_blocked': 0,
+            'green_blocked': 0,
+            'red_blocked': 0,
+        }
+        for state in exploration:
+            if state['green_blocked']:
+                if state['red_blocked']:
+                    cumulative_reward.update(
+                        both_blocked=cumulative_reward.get('both_blocked')
+                        + state['reward']
+                    )
+                else:
+                    cumulative_reward.update(
+                        green_blocked=cumulative_reward.get('green_blocked')
+                        + state['reward']
+                    )
+            else:
+                if state['red_blocked']:
+                    cumulative_reward.update(
+                        red_blocked=cumulative_reward.get('red_blocked')
+                        + state['reward']
+                    )
+                else:
+                    cumulative_reward.update(
+                        none_blocked=cumulative_reward.get('none_blocked')
+                        + state['reward']
+                    )
+
+        items = list(cumulative_reward.items())
+        if sorted:
+            items.sort(key=lambda x: x[1], reverse=True)
+        return items
